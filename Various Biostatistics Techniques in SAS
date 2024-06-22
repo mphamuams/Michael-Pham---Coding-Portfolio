@@ -1,0 +1,265 @@
+/* 
+   Demonstrating solutions to various data manipulation tasks.
+*/
+
+*************************************************************************************
+** Problem 1: Frequency Table (College Data) **
+
+* This code snippet generates a three-way frequency table using PROC FREQ.
+* Input data: 'college.sas7bdat' 
+
+proc freq data='college.sas7bdat' order=data;
+  table Gender*Scholarship*SchoolSize / nocol nopercent;
+run;
+
+*************************************************************************************
+** Problem 2: Hospital Data Analysis **
+
+* This code analyzes hospital data ('hosp.sas7bdat') and creates new datasets.
+* Input data: 'hosp.sas7bdat' 
+
+data hosp2;
+  set 'hosp.sas7bdat';
+
+  * Calculate age at admission and today's age
+  Today = today();
+  AgeToday = ROUND((Today - DOB)/365.25);
+  AgeAdmit = ROUND((AdmitDate - DOB)/365.25);
+
+  * Compute length of stay (LOS) in days
+  LOS = ROUND(DischrDate - AdmitDate);
+
+  * Assign group based on age and LOS criteria
+  if AgeAdmit >= 0 and AgeAdmit <= 49 and LOS >= 0 and LOS <= 6 then Group = 1;
+  if AgeAdmit >= 0 and AgeAdmit <= 49 and LOS >= 7 then Group = 2;
+  if AgeAdmit >= 50 and LOS >= 0 and LOS <= 6 then Group = 3;
+  if AgeAdmit >= 50 and LOS >= 7 then Group = 4;
+
+  * Format Today variable for date display
+  format Today MMDDYY10.;
+run;
+
+* Print basic information and frequency table for initial exploration
+proc print data=hosp2;
+run;
+
+proc freq data=hosp2 order=data;
+  table Group / nocol nopercent nocum;
+run;
+
+* Create separate datasets (Group1, Group2, Group3_4) based on 'Group' variable
+data Group1 Group2 Group3_4;
+  set 'hosp.sas7bdat';
+
+  Today = today();
+  AgeToday = ROUND((Today - DOB)/365.25);
+  AgeAdmit = ROUND((AdmitDate - DOB)/365.25);
+  LOS = ROUND(DischrDate - AdmitDate);
+
+  if AgeAdmit >= 0 and AgeAdmit <= 49 and LOS >= 0 and LOS <= 6 then output Group1;
+  else if AgeAdmit >= 0 and AgeAdmit <= 49 and LOS >= 7 then output Group2;
+  else if AgeAdmit >= 50 and LOS >= 0 and LOS <= 6 then output Group3;
+  else if AgeAdmit >= 50 and LOS >= 7 then output Group3_4;
+
+  format Today MMDDYY10.;
+run;
+
+* Print data from each newly created group
+proc print data=Group1 title='Group1 Data';
+run;
+
+proc print data=Group2 title='Group2 Data';
+run;
+
+proc print data=Group3_4 title='Group3_4 Data';
+run;
+
+*************************************************************************************
+** Problem 3: Merging Purchase and Inventory Data **
+
+* This code merges 'Purchase' and 'Inventory' datasets based on 'Model Number'
+
+data Purchase;
+  input CustomerID Model Units;
+  datalines;
+  101 L776    1
+  102 M123    10
+  103 X999    2
+  103 M567    1
+;
+run;
+
+data Inventory;
+  input Model Cost;
+  datalines;
+  M567    $23.50 
+  S888    $12.99 
+  L776    $159.98 
+  X999    $29.95 
+  M123    $4.59 
+  S776    $1.99 
+;
+run;
+
+* Sort datasets by Model Number for efficient merge
+proc sort data=Purchase; by Model; run;
+proc sort data=Inventory; by Model; run;
+
+data merged;
+  merge Inventory Purchase (in=flag);
+  by Model;
+  if flag=1; 
+  format Cost dollar8.2;
+run;
+
+* Print the merged data
+proc print data=merged;
+run;
+
+*************************************************************************************
+** Problem 4: Symptom Rating Analysis **
+
+* This code analyzes symptom ratings and creates a new diagnostic variable
+
+data Symptom;
+  input symp1 $ symp2 $ symp3 $ symp4 $ symp5 $ symp6 $ ;
+
+  array symp{6} symp1 symp2 symp3 symp4 symp5 symp6; 
+  do count = 1 to 6;
+    * Convert symptom letters to numeric (0 for absent/rarely, 1 for often/frequently)
+    if symp{count} = 'a' or symp{count} = 'b' then symp{count} = 0;
+    if symp{count} = 'c' or symp{count} = 'd' then symp{count} = 1;
+  end;
+
+  * Create a variable 'Diag' to identify patients with at least 4 high ratings
+  if sum(symp1, symp2, symp3, symp4, symp5, symp6) >= 4 then Diag = 1;
+  else Diag = 0;
+
+datalines;
+a a b d a b
+c c a a b d
+a a b d d d
+c c c c a d
+d d d a d a
+;
+run;
+
+* Print data with symptom ratings and diagnosis flag
+proc print data=Symptom;
+run;
+
+*************************************************************************************
+** Problem 5: Quiz Grade Analysis and Pass/Fail Counting **
+
+* This code analyzes quiz grades, handles invalid values, and counts passed quizzes
+
+data Quiz;
+  input ID Quiz1 Quiz2 Quiz3;
+
+  array quiz{3} Quiz1 Quiz2 Quiz3;
+  array PassEvaluation{3} PassEvaluation1 PassEvaluation2 PassEvaluation3;
+
+  * Replace invalid grades (<50 or >100) with missing values
+  do count = 1 to 3;
+    if quiz{count} < 50 or quiz{count} > 100 then quiz{count} = .;
+  end;
+
+  * Create a 'Passed' variable counting quizzes with grades over 60 (passing grade)
+  do count = 1 to 3;
+    if quiz{count} >= 60 then PassEvaluation{count} = 1;
+    else PassEvaluation{count} = 0;
+  end;
+
+  Passed = sum(PassEvaluation1, PassEvaluation2, PassEvaluation3);
+
+datalines;
+01  59      83      20
+02  89      89      93
+03  80      57      78
+04  90     113      50
+05  76      56      61
+;
+run;
+
+* Print data with analyzed grades, pass/fail indicators, and total passed quizzes
+proc print data=Quiz;
+run;
+
+*************************************************************************************
+** Problem 6: WBC Data Analysis and Merging with Exposure Data **
+
+* This code analyzes WBC data, creates a year variable, and merges with exposure data
+
+data WBC;
+  format Date MMDDYY10.;
+  informat Date MMDDYY10.;
+  input ID Date WBC;
+
+  * Calculate year from 'Date'
+
+  year = year(Date);
+  datalines;
+  1 12/13/40 6000 
+  2 01/18/42 8000
+  3 09/06/41 9000
+  4 05/05/40 6500
+  5 11/12/42 8500
+  6 03/01/42 8900
+;
+run;
+
+data EXP;
+  input year exposure;
+  datalines;
+  1940    200
+  1941    150
+  1942    100
+  1943    080
+;
+run;
+
+* Sort datasets by year for efficient merge
+proc sort data=WBC; by year; run;
+proc sort data=EXP; by year; run;
+
+data Combine;
+  merge EXP WBC (in=flag);
+  by year;
+  if flag=1; 
+  exposure = exposure;
+run;
+
+* Print the merged data with WBC results and exposure levels
+proc print data=Combine;
+run;
+
+*************************************************************************************
+** Problem 7: Sales Data Analysis - Finding Highest, Second Highest, Total, and Average **
+
+* This code analyzes sales data and calculates various sales metrics
+
+data SALES;
+  input ID Q1 Q2 Q3 Q4;
+  datalines;
+  1   1567    999     790     6789
+  2   789     1984    600     8120
+  3   2900    6780    3400    890
+  4   100     2800    2222    123
+  5   569     876     5000    482
+;
+run;
+
+data SALES;
+  set SALES;
+
+  array quarters[4] Q1-Q4;
+  * Sort quarters array to find highest and second highest sales values
+  call sortn(of quarters[*]); 
+  highest = max(of Q1-Q4);
+  sechigh = quarters[3];
+  total = sum(of Q1-Q4);
+  average = mean(of Q1-Q4);
+run;
+
+* Print data with original sales figures and calculated sales metrics
+proc print data=SALES; run;
