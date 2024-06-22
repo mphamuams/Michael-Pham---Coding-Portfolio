@@ -1,0 +1,140 @@
+---
+title: "Various Biostatistics Techniques and Analysis"
+output: html_document
+date: "May 10, 2024)
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+options(digits = 5)
+```
+
+```{r}
+library(tidyverse) 
+library(knitr)
+library(readr) 
+library(ggpubr) 
+library(ggfortify) 
+library(gridExtra) 
+library(car)
+library(GGally)
+library(DHARMa)
+library(emmeans)
+library(caret)
+library(e1071)
+```
+# 1. Two-Way ANOVA 
+
+* `stayLength`: Average length of stay of all patients in hospital (in days)
+* `age`: Average age of patients (in years)
+* `infectionRisk`: Average estimated probability of acquiring infection in hospital (in percent)
+* `cultureRatio`: Ratio of number of cultures performed to number of patients without signs or symptoms of hospital-acquired infection, times 100
+* `xrayRatio`: Ratio of number of X-rays performed to number of patients , without signs or symptoms of pneumonia, times 100
+* `beds`: Average number of beds in hospital during study period
+* `school` Med school affiliation (Yes or No)
+* `region`: Geographic region (NE, NC, S, W)
+* `patients`: Average number of patients in hospital per day during study period
+* `nurses`: Average number of full-time equivalent registered and licensed practical nurses during study period (number full-time plus one half the number part time)
+* `facilities`: Percent of 35 potential facilities and services that are provided by the hospital
+
+### (a) Import the data.
+```{r}
+SENIC <- read_csv("D:/rprojects/Biostats II/SENIC.csv")
+```
+
+### (b) Create and produce the summary of a two-way ANOVA model that compares infectionRisk across medschool affiliation and region. 
+```{r}
+senic_model <- lm(infectionRisk ~ school * region, data = SENIC)
+Anova(senic_model)
+```
+
+### (c) Explain the results of the ANOVA model in (b). 
+An F-Value of 5.26 for school and 2.38 for region suggests that infection risk differs among medical school affiliation status and regions. It also suggests that the interactive effects between infection risk and school affiliation does not significantly vary across regions (p=0.209). 
+
+### (d) Is it appropriate to do main effects pairwise comparisons between the school and region groups, or should we have to look at the interaction pairwise comparisons? Explain why or why not. 
+The p-value for the interaction term "school:region" is 0.209, which is not statistically significant at the conventional significance level of 0.05. Therefore, separate main effects pairwise comparisons for school and region seems to be more appropriate, as there is no evidence to suggest that the relationship between school affiliation and infection risk significantly varies across different regions. 
+
+### (e) Depending on which one you determined is appropriate perform either the main effect pairwise comparisons for both factors, or the interaction pairwise comparisons. Make sure to use a p-value/CI adjustment method, e.g., Tukey HSD, Holm, etc. Just show the output for the comparisons. 
+```{r}
+means <- emmeans(senic_model, specs = c("school", "region"))
+pairs(means, adjust = "tukey")
+```
+
+### (f) Sumamrise the pairwise comparisons in terms of how your chosen objective variable is related to school and region. 
+No statistically significant differences in infection risk are observed between pairs of schools with all comparisons having p values greater than 0.05. Similarly, most pairwise comparisons between regions show no significant differences in infection risk. However, a marginal difference in infection risk is noted between "Yes NE" and "No S" regions (p = 0.0617). These findings collectively suggest that while there are minor variations in infection risk between specific regions, neither school affiliation nor regional factors play a predominant role in determining infection risk, as indicated by the lack of significant differences in most pairwise comparisons.
+
+### (g) Assess the ANOVA assumptions. Do you think your results are reliable? 
+The Residuals vs Fitted graph looks good with the values distributed mostly around the middle line and spreading out smoothly. There also appears to be minimal outliers. The Normal Q-Q graph looks borderline perfect. The p-value associated with Levene's test is 0.5, suggesting that there is no significant evidence to reject the null hypothesis of equal variances across groups. It would appear that the results are reliable based on these tests. 
+
+```{r}
+autoplot(senic_model)
+leveneTest(senic_model)
+```
+
+# 2. Logistic regression 
+
+The following data is a modified form of a famous dataset from the [UCI Machine Learning Data Repository](https://archive.ics.uci.edu/ml/index.php). Researchers collected data related to various physical aspects of many patients. Their objective was to create a way of classifying whether their patients had heart disease or not without performing invasive procedures. To that end, they collected the following information from the patients.
+
+**The data file is available online as `Heart.csv`.**
+
+* `age`: The person's age in years
+* `RestBP`: The person's resting blood pressure (mm Hg on admission to the hospital)
+* `Chol`: The person's cholesterol measurement in mg/dl
+* `MaxHR`: The person's maximum heart rate achieved during controlled exercise
+* `AHD`: Whether or not a person has heart disease.
+      + `1`: The do have a heart disease.
+      + `0`: They do not have a heart disease.
+
+### (a) Import the data.
+```{r}
+heart <- read_csv("D:/rprojects/Biostats II/Heart.csv")
+```
+
+### (b) Create and produce the summary of a logistic regression model to predict the presence of heart diseasing using all other variables as predictors. 
+```{r}
+model_heart <- glm(formula = AHD ~ Age + RestBP + Chol + MaxHR, family = binomial, heart)
+summary(model_heart)
+```
+
+### (c) Write an interpretation of the table. 
+Only resting blood pressure and maximum heart rate have statistically significant associations (p-value < 0.05) with heart disease. Higher resting blood pressure and lower maximum heart rate are associated with an increased risk of heart disease in this data. 
+
+### (d) Check multicollinearity. Should we remove any variables? Explain. 
+All VIF values are close to 1. Based on these VIF values, there is no strong evidence of multicollinearity among the predictor variables in your logistic regression model. Therefore, there is no need to remove any variables based on multicollinearity. 
+```{r}
+vif(model_heart)
+```
+
+### (e) Use stepwise regression to create a reduced model. Provide a model summary. 
+```{r}
+reduced_model <- step(model_heart)
+summary(reduced_model)
+```
+
+### (f) Create a confusion matrix for the reduced model. Explain how well (or not) the model works. 
+The model achieves a moderate level of accuracy (70.3%) in classifying the data, with a statistically significant improvement over random guessing (p-value < 0.001). However, the kappa statistic (0.396) suggests only fair agreement between the model's predictions and the true labels. Sensitivity (78%) is good at catching true positives, but specificity (61%) is lower, meaning the model might misclassify some negative cases.
+```{r}
+### To get viable actual and predicted values plug your model into this code where it says 'model'
+### You have to specify the correct prediction type for the predict function.
+predicted <- ifelse(predict(reduced_model, type = "response") >= 0.5,1,0)
+
+confusionMatrix(factor(predicted), factor(heart$AHD))
+```
+
+### (g) Plot the residuals versus predicted via the DHARMa package. Are there any issues? 
+The residual does not suggest that there are any significant problems. 
+```{r}
+simRes <- simulateResiduals(reduced_model, n = 1000)
+
+plot(simRes)
+```
+
+### (h) Check the distribution of the residuals via the DHARMa QQ-plot. Do there appear to be any major issues? 
+It seems that there are no major issues with the Q-Q plot. It looks good with all values adhereing closely to the line and minimal outliers. 
+
+### (i) Are there any extreme outliers? Use `autoplot()` with the argument `which = 4` to get a Cook's D plot. 
+Observation 237 appears to be an extreme outlier with a relatively large Cook's distance. To a lesser extent observation 2 is also standing out as an outlier. 
+```{r}
+autoplot(reduced_model, which = 4)
+```
+
