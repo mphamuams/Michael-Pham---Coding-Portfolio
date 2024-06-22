@@ -1,0 +1,358 @@
+# Final Project: Predicting if Social Media Posts are Referring to Drug Shortages using NLP Techniques
+# Student: Michael Pham 
+
+### Techniques Used
+
+# Data Handling and Preprocessing:
+# - Parsing JSON files, filtering, cleaning, and deduplicating text data
+
+# Text Processing:
+# - Tokenization, stopword removal, lowercasing, creating Document-Term Matrices (DTMs)
+# - Text classification with keyword matching
+
+# Topic Modeling:
+# - Latent Dirichlet Allocation (LDA) using Gibbs sampling
+# - Visualizing topics with LDAvis and t-SNE
+# - Applying document weights to enhance model performance
+
+# Machine Learning:
+# - Data splitting, preprocessing, and Naive Bayes classification
+# - 10-fold cross-validation and model evaluation with confusion matrices
+
+# Load required libraries
+library(jsonlite)
+library(tm)
+library(tidyverse)
+library(tidytext)
+library(dplyr)
+library(topicmodels)
+library(LDAvis)
+library(tsne)
+library(tidyr)
+library(reshape2)
+library(quanteda)
+library(caret)
+library(e1071)
+library(klaR)
+library(tidymodels)
+library(textrecipes)
+library(discrim)
+library(naivebayes)
+
+# Define the directory containing the JSON files
+directory <- "D:/rprojects/Bona II/methylphenidate/methylphenidate/"
+
+# Get the list of JSON files in the directory
+file_paths <- list.files(directory, pattern = "\\.json$", full.names = TRUE)
+
+# Initialize an empty list to store non-blank texts
+non_blank_texts <- list()
+
+# Iterate over each JSON file
+for (file_path in file_paths) {
+  # Read JSON data
+  json_data <- fromJSON(file_path)
+  
+  # Check if 'selftext' column exists and is not null
+  if (!is.null(json_data$selftext)) {
+    texts <- json_data$selftext
+    
+    # Create corpus
+    corpus <- Corpus(VectorSource(texts))
+    
+    # Iterate over each text box in the corpus
+    for (i in 1:length(corpus)) {
+      # Extract text content from the current text box
+      text <- corpus[[i]][["content"]]
+      
+      # Check if the text is not blank
+      if (!is.null(text) && !is.na(text) && nchar(text) > 0) {
+        # Add non-blank text to the list
+        non_blank_texts[[length(non_blank_texts) + 1]] <- text
+      }
+    }
+  }
+}
+
+# Convert the list of non-blank texts to a data frame
+text_df <- data.frame(Text = unlist(non_blank_texts), stringsAsFactors = FALSE)
+
+# Define keywords related to shortages
+shortage_keywords <- c("shortage", "stock", "available", "backorder", "depleted", "unavailable", "supply", "can't get", "order")
+
+classify_shortage <- function(text) {
+  text <- tolower(text)  # Lowercase the text
+  return(any(grepl(shortage_keywords, text)))  # Check for any shortage keywords
+}
+
+# Add a new column "Shortage" to the text_df
+text_df$Shortage <- sapply(text_df$Text, classify_shortage)
+# "Shortage" will be TRUE if a shortage keyword is found, FALSE otherwise
+
+# Manually review and convert observations that contain keywords, but aren't relevant
+observations_to_convert <- c(226, 6341, 7078, 8231, 9550, 12348, 15066, 15082, 15799, 16012, 18270, 18524, 19315, 19908, 20124, 21096, 21326) 
+text_df$Shortage[observations_to_convert] <- FALSE
+
+# Remove posts that are irrelevant (Spam, advertising, etc.)
+text_df <- filter(text_df, !grepl("^\\[removed\\]$|^\\[deleted\\]$|Recruiting|Here's what is in stock|\\*\\*|PRICELIST|text us at|participant|participants|www|http", Text))
+
+# Remove duplicates
+text_df <- distinct(text_df, .keep_all = TRUE)
+
+##################################################################
+# Generating a topic model to help classify posts
+
+set.seed(123)
+
+# Create a corpus object
+corpus <- corpus(text_df, text_field = "Text")
+
+# Tokenize
+corpus_tokens <- corpus %>%
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
+  tokens_tolower() %>%
+  tokens_remove(pattern = stopwords('en'))
+
+# Create document-term matrix
+DTM <- corpus_tokens %>%
+  dfm() %>%
+  dfm_trim(min_docfreq = 0.1, docfreq_type = "prop")
+
+# Examine
+dim(DTM)
+
+# Number of topics
+K <- 20
+
+# Get the number of words per document
+num_words <- apply(DTM, 1, function(x) sum(x > 0, na.rm = TRUE))
+
+# Find documents with zero words
+empty_docs <- which(num_words == 0)
+
+# Keep only documents with non-zero words
+corpus_tokens <- corpus_tokens[-empty_docs, ]
+DTM <- corpus_tokens %>% dfm() %>% dfm_trim(min_docfreq = 0.1, docfreq_type = "prop")
+
+# Compute the LDA model, inference via n iterations of Gibbs sampling
+topicModel <- LDA(DTM, K, method = "Gibbs", control = list(iter = 500, seed = 1, verbose = 25), beta = 1)  
+
+# Function to compute t-SNE using SVD
+svd_tsne <- function(x) tsne(svd(x)$u)
+
+# Create JSON for LDAvis
+json <- createJSON(
+  phi = posterior(topicModel)$terms,
+  theta = posterior(topicModel)$topics,
+  doc.length = rowSums(DTM),
+  vocab = colnames(DTM),
+  term.frequency = colSums(DTM),
+  mds.method = svd_tsne,
+  plot.opts = list(xlab = "", ylab = "")
+)
+
+# Visualize using LDAvis
+serVis(json)
+
+##################################################################
+# Investigation tool that prints the top 3 topics for a confirmed observation that is about shortage
+
+# Get the document-topic distribution
+doc_topics <- posterior(topicModel)$topics
+
+# Extract the topic proportions for observation 1926
+topics_1926 <- doc_topics[12851, ]
+
+# Sort the topics by their proportions
+sorted_topics <- sort(topics_1926, decreasing = TRUE)
+
+# Print the top topics associated with observation 1926
+top_topics <- head(sorted_topics, 3) 
+print(top_topics)
+
+##################################################################
+# Investigation tool that pulls out observations based on given topic number and threshold
+
+# Get the document-topic distribution
+doc_topics <- posterior(topicModel)$topics
+
+topic_number <- 8
+
+# Lower threshold for topic association
+topic_threshold <- 0.1  # Adjust threshold as needed
+
+# Find observations associated with the specific topic
+topic_docs <- which(doc_topics[, topic_number] > topic_threshold)
+
+# Check if any observations are associated with the topic
+if (length(topic_docs) > 0) {
+  # Extract the text data for these observations
+  topic_text <- text_df[topic_docs, ]
+  
+  # Convert the selected observations into a data frame
+  topic_df <- data.frame(topic_text)
+  
+  # Print or further process the data frame
+  print(topic_df)
+} else {
+  print("No observations associated with the specified topic.")
+}
+
+View(topic_df)
+
+##################################################################
+# Investigation tool that prints the most representative topic for a given keyword
+
+# Create a data frame with the sampled text data
+# text_sampled <- data.frame(text = text_sampled)
+
+# Find observation numbers containing the phrase "shortage"
+out_of_stock_indices <- grep("shortage", text_df$Text, ignore.case = TRUE)
+
+# Get the document-topic distribution
+doc_topics <- posterior(topicModel)$topics
+
+# Extract the topic proportions for observations containing "out of stock"
+out_of_stock_topics <- apply(doc_topics[out_of_stock_indices, ], 2, mean)
+
+# Find the topic with the highest proportion
+most_representative_topic <- which.max(out_of_stock_topics)
+
+# Print the most representative topic
+print(most_representative_topic)
+
+##################################################################
+# Investigation tool that creates a quick visualization table of the terms contained in a specified topic 
+
+# Get the top terms for each topic from the LDA model
+terms <- as.data.frame(terms(topicModel, 20))
+
+# Print the top terms for each topic
+View(terms)
+
+# Check if any topics contain relevant keywords
+relevant_topics <- lapply(terms, function(terms) any(terms %in% shortage_keywords))
+
+data.frame(relevant_topics)
+
+##################################################################
+# Version of topic modeling that utilizes "weight" to boost shortage texts
+
+set.seed(123)
+
+# Create a corpus object
+corpus <- corpus(text_df, text_field = "Text")
+
+# Tokenize
+corpus_tokens <- corpus %>%
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
+  tokens_tolower() %>%
+  tokens_remove(pattern = stopwords('en'))
+
+# Create document-term matrix
+DTM <- corpus_tokens %>%
+  dfm() %>%
+  dfm_trim(min_docfreq = 0.1, docfreq_type = "prop")
+
+# Examine
+dim(DTM)
+
+# Number of topics
+K <- 15
+
+# Get the number of words per document
+num_words <- apply(DTM, 1, function(x) sum(x > 0, na.rm = TRUE))
+
+# Define weights based on the shortage variable
+base_weight <- 2  # Base weight for shortage documents
+additional_weight <- 6  # Additional weight to increase further
+
+# Increase the weight of shortage documents further
+weights <- ifelse(text_df$Shortage, base_weight * additional_weight, base_weight)
+
+# Remove empty documents from both DTM and weights
+DTM_filtered <- DTM[-empty_docs, ]
+weights_filtered <- weights[-empty_docs]
+
+# Check if any documents remain
+if (nrow(DTM_filtered) == 0) {
+  stop("No documents remain after removing empty ones.")
+}
+
+# Apply weights to the Document-Term Matrix (DTM)
+weighted_DTM <- DTM_filtered * weights_filtered
+
+# Compute the LDA model with weighted DTM
+topicModel <- LDA(weighted_DTM, K, method = "Gibbs", control = list(iter = 500, seed = 1, verbose = 25), beta = 1)
+
+# Function to compute t-SNE using SVD
+svd_tsne <- function(x) tsne(svd(x)$u)
+
+# Create JSON for LDAvis
+json <- createJSON(
+  phi = posterior(topicModel)$terms,
+  theta = posterior(topicModel)$topics,
+  doc.length = rowSums(weighted_DTM),
+  vocab = colnames(weighted_DTM),
+  term.frequency = colSums(weighted_DTM),
+  mds.method = svd_tsne,
+  plot.opts = list(xlab = "", ylab = "")
+)
+
+# Visualize using LDAvis
+serVis(json)
+
+##################################################################
+# Naive Bayes Predictive Modeling
+
+set.seed(123)
+
+# Split the data into training and test sets (75% training, 25% test)
+split_data <- initial_split(text_df)
+
+train_data <- training(split_data)
+test_data <- testing(split_data)
+
+# Preprocessing
+data_rec <- recipe(Shortage ~ Text, data = train_data)
+
+data_rec <- data_rec %>%
+  step_tokenize(Text) %>%
+  step_tokenfilter(Text, max_tokens = 1e3) %>%
+  step_tfidf(Text)
+
+data_wf <- workflow() %>%
+  add_recipe(data_rec)
+
+train_data$Shortage <- as.factor(train_data$Shortage)
+
+# Perform naive Bayes training
+nb_spec <- naive_Bayes() %>%
+  set_mode("classification") %>%
+  set_engine("naivebayes")
+
+nb_fit <- data_wf %>%
+  add_model(nb_spec) %>%
+  fit(data = train_data)
+
+# 10-fold Cross Validation 
+set.seed(123)
+
+data_folds <- vfold_cv(train_data)
+
+nb_wf <- workflow() %>%
+  add_recipe(data_rec) %>%
+  add_model(nb_spec)
+
+nb_rs <- fit_resamples(
+  nb_wf,
+  data_folds,
+  control = control_resamples(save_pred = TRUE)
+)
+
+nb_rs_metrics <- collect_metrics(nb_rs)
+nb_rs_predictions <- collect_predictions(nb_rs)
+
+# Evaluate the model 
+conf_mat_resampled(nb_rs, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
