@@ -1,0 +1,242 @@
+# Using Machine Learning to Predict Patient Disease State Based on Simulated Lab Results
+
+# Techniques Used:
+
+# Model Building and Training:
+# - Scikit-learn:
+#   - Train-Test Split: Splits data into training and testing sets.
+#   - Random Forest Classifier: Builds a multi-output random forest model
+#     for multi-class classification.
+
+# Model Evaluation:
+# - Scikit-learn:
+#   - Accuracy Score: Calculates the overall accuracy of the model.
+#   - Classification Report: Provides detailed classification metrics.
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import pydot
+from six import StringIO
+from IPython.display import Image
+from sklearn import tree
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.tree import DecisionTreeClassifier, export_graphviz, DecisionTreeRegressor, plot_tree
+from sklearn.metrics import confusion_matrix, classification_report, mean_squared_error, accuracy_score
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, BaggingClassifier, GradientBoostingClassifier, GradientBoostingRegressor
+from pydot import graph_from_dot_data
+from sklearn.manifold import Isomap, MDS, TSNE
+from sklearn.decomposition import PCA
+from sklearn.svm import SVC
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+import math
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import make_scorer, f1_score
+
+conditions = pd.read_csv("D:/rprojects/Machine Learning/synthea/csv/conditions.csv")
+medications = pd.read_csv("D:/rprojects/Machine Learning/synthea/csv/medications.csv")
+observations = pd.read_csv("D:/rprojects/Machine Learning/synthea/csv/observations.csv")
+
+# Clean conditions
+conditions = conditions[conditions['STOP'].isnull()]
+conditions = conditions.drop(columns=['ENCOUNTER'])
+conditions = conditions.drop(columns=['START'])
+conditions = conditions.drop(columns=['STOP'])
+conditions = conditions.drop(columns=['CODE'])
+
+conditions_top_10 = ["Body mass index 30+ - obesity (finding)", "Prediabetes", "Hypertension", "Anemia (disorder)", "Chronic sinusitis (disorder)", "Miscarriage in first trimester", "Hyperlipidemia", "Diabetes", "Metabolic syndrome X (disorder)", "Hypertriglyceridemia (disorder)"]
+conditions = conditions[conditions['DESCRIPTION'].isin(conditions_top_10)]
+
+# Create a dictionary to store disease counts
+disease_counts = {}
+for description in conditions["DESCRIPTION"]:
+  if description not in disease_counts:
+    disease_counts[description] = 0
+  disease_counts[description] += 1
+
+# Create new columns based on disease counts
+for disease, count in disease_counts.items():
+
+  # Create new columns based on disease counts
+  for disease, count in disease_counts.items():
+    # Create a new column with the disease name
+    conditions[disease] = conditions['DESCRIPTION'].apply(lambda x: 1 if x == disease else 0)
+
+conditions.drop(columns=['DESCRIPTION'], inplace=True)
+
+# Use melt function to reshape the data frame
+conditions = conditions.melt(id_vars="PATIENT", var_name="variable", value_name="value")
+
+# Pivot table to get the desired format
+conditions = conditions.pivot_table(values='value', index='PATIENT', columns='variable', aggfunc='max')
+
+#########################################################################################
+# Clean medications
+medications = medications[medications['STOP'].isnull()]
+medications = medications.drop(columns=['REASONDESCRIPTION'])
+medications = medications.drop(columns=['REASONCODE'])
+medications = medications.drop(columns=['DISPENSES'])
+medications = medications.drop(columns=['TOTALCOST'])
+medications = medications.drop(columns=['BASE_COST'])
+medications = medications.drop(columns=['PAYER_COVERAGE'])
+medications = medications.drop(columns=['ENCOUNTER'])
+medications = medications.drop(columns=['PAYER'])
+medications = medications.drop(columns=['START'])
+medications = medications.drop(columns=['STOP'])
+
+#########################################################################################
+# Clean observations
+observations = observations.drop(columns=['ENCOUNTER'])
+observations = observations.drop(columns=['CODE'])
+observations = observations.drop(columns=['UNITS'])
+
+# Get unique descriptions and their first corresponding values
+descriptions = observations.groupby('DESCRIPTION')['VALUE'].first().reset_index()
+
+# Create new columns using dictionary comprehension (efficient)
+new_columns = {desc: observations[observations['DESCRIPTION'] == desc]['VALUE']
+                for desc, _ in descriptions.values}
+
+# Add new columns to 'observations' DataFrame at once
+observations = observations.assign(**new_columns)  # Efficient for multiple columns
+
+# Drop 'DESCRIPTION' and 'VALUE' columns if not needed
+observations.drop(columns=['DESCRIPTION', 'VALUE'], inplace=True)
+
+desired_columns = ["DATE","PATIENT", "TYPE", "Pain severity - 0-10 verbal numeric rating [Score] - Reported","Weight difference [Mass difference] --pre dialysis - post dialysis", "Glucose", "Urea Nitrogen","Creatinine", "Calcium", "Sodium","Carbon Dioxide", "Chloride", "Potassium","Diastolic Blood Pressure", "Systolic Blood Pressure","Body Height", "Respiratory rate", "Body Weight","Heart rate", "Body Mass Index", "High Density Lipoprotein Cholesterol","Total Cholesterol", "Triglycerides", "Low Density Lipoprotein Cholesterol","Hemoglobin A1c/Hemoglobin.total in Blood", "Microalbumin Creatinine Ratio", "Estimated Glomerular Filtration Rate"]
+def keep_specific_columns(observations, desired_columns):
+
+  if isinstance(observations, pd.DataFrame):
+    # Handle pandas DataFrame
+    return observations[desired_columns]
+  elif isinstance(observations, dict):
+    # Handle dictionary
+    return {key: observations[key] for key in key if key in desired_columns}
+  else:
+    raise ValueError("observations must be a pandas DataFrame or dictionary.")
+
+observations = keep_specific_columns(observations, desired_columns)
+observations = observations[observations['TYPE'] == "numeric"]
+observations = observations.drop(columns=['DATE'])
+observations = observations.drop(columns=['TYPE'])
+
+columns_list = ["Pain severity - 0-10 verbal numeric rating [Score] - Reported","Weight difference [Mass difference] --pre dialysis - post dialysis", "Glucose", "Urea Nitrogen","Creatinine", "Calcium", "Sodium","Carbon Dioxide", "Chloride", "Potassium","Diastolic Blood Pressure", "Systolic Blood Pressure","Body Height", "Respiratory rate", "Body Weight","Heart rate", "Body Mass Index", "High Density Lipoprotein Cholesterol","Total Cholesterol", "Triglycerides", "Low Density Lipoprotein Cholesterol","Hemoglobin A1c/Hemoglobin.total in Blood", "Microalbumin Creatinine Ratio", "Estimated Glomerular Filtration Rate"]
+
+# Convert specified columns to float data type
+observations[columns_list] = observations[columns_list].astype(float)
+
+observations = observations.groupby('PATIENT').mean()
+
+#########################################################################################
+# Merge tables
+data = pd.merge(conditions, observations, on='PATIENT', how='inner')
+# data = pd.merge(data, observations, on='PATIENT', how='inner')
+
+# data['DESCRIPTION'].nunique()
+# description_obv_counts = data['DESCRIPTION'].value_counts()
+# print(description_obv_counts.head(n=10))
+# conditions.to_csv("D:/rprojects/Machine Learning/synthea/csv/test.csv")
+
+# Apply mean imputation to handle missing values
+imputer = SimpleImputer(strategy='mean')
+X_imputed = imputer.fit_transform(data[columns_list])
+
+# Convert X_imputed back to a DataFrame
+X = pd.DataFrame(X_imputed, columns=columns_list)
+y = data[conditions_top_10]
+
+# Splitting data into train and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Random Forest Classifier with MultiOutputClassifier
+clf_rf = RandomForestClassifier(max_depth=20, min_samples_leaf=1, min_samples_split=2, n_estimators=100, random_state=42)
+multi_target_rf = MultiOutputClassifier(clf_rf, n_jobs=-1)
+multi_target_rf.fit(X_train, y_train)
+
+# Predictions
+y_pred = multi_target_rf.predict(X_test)
+
+# Evaluation
+accuracy = accuracy_score(y_test, y_pred)
+print("Accuracy:", accuracy)
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred, target_names=conditions_top_10))
+
+# Feature Importance
+importance = pd.DataFrame({'Importance': multi_target_rf.estimators_[0].feature_importances_}, index=columns_list)
+importance.sort_values('Importance', axis=0, ascending=True).plot(kind='barh', color='r')
+plt.xlabel('Variable Importance')
+plt.tight_layout()
+plt.show()
+
+# Confusion Matrix
+conf_matrix = np.zeros((len(conditions_top_10), len(conditions_top_10)))
+for i in range(len(y_test)):
+    for j in range(len(conditions_top_10)):
+        if y_test.iloc[i, j] == 1 and y_pred[i, j] == 1:
+            conf_matrix[j, j] += 1
+        elif y_test.iloc[i, j] == 1 and y_pred[i, j] == 0:
+            for k in range(len(conditions_top_10)):
+                if y_pred[i, k] == 1:
+                    conf_matrix[j, k] += 1
+                    break
+
+plt.figure(figsize=(10, 8))
+sns.heatmap(conf_matrix, annot=True, fmt='g', cmap='Blues', xticklabels=conditions_top_10, yticklabels=conditions_top_10)
+plt.xlabel('Predicted Labels')
+plt.ylabel('True Labels')
+plt.title('Confusion Matrix')
+plt.tight_layout()
+plt.show()
+
+#########################################################################################
+# Tuning hyperparameters using grid search
+
+# Define the parameter grid
+param_grid = {
+    'n_estimators': [100, 500, 1000],
+    'max_depth': [None, 10, 20],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4]
+}
+
+# Define a scorer for F1-score
+f1_scorer = make_scorer(f1_score, average='weighted')
+
+# Create the GridSearchCV object
+grid_search = GridSearchCV(estimator=RandomForestClassifier(random_state=42),
+                           param_grid=param_grid,
+                           cv=5,  # 5-fold cross-validation
+                           scoring=f1_scorer,
+                           n_jobs=-1)
+
+# Perform grid search on the training data
+grid_search.fit(X_train, y_train)
+
+# Get the best hyperparameters
+best_params = grid_search.best_params_
+print("Best Hyperparameters:", best_params)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
