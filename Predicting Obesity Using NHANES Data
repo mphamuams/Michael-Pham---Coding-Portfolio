@@ -1,0 +1,134 @@
+# Predicting Obesity Using NHANES Data
+
+## Techniques Used
+
+# Data Handling:
+# - Reading and parsing NHANES XPT files
+# - Merging datasets, checking for duplicates, and verifying integrity
+
+# Feature Engineering:
+# - Creating a binary obesity variable (BMI-based)
+
+# Statistical Modeling:
+# - Linear and logistic regression
+# - Calculating and interpreting odds ratios
+
+# Predictive Modeling:
+# - Making predictions and evaluating with confusion matrices
+# - Calculating accuracy, sensitivity, and specificity
+
+# Visualization:
+# - Plotting histograms and ROC curves
+
+# Model Evaluation:
+# - Calculating AUC and bootstrap confidence intervals
+# - Train-test split for model validation
+
+# Load required libraries
+library(haven)
+library(margins)
+library(pROC)
+library(e1071)
+library(stargazer)
+library(tidyverse)
+
+# Read the NHANES files
+demo <- read_xpt("https://wwwn.cdc.gov/Nchs/Nhanes/2017-2018/DEMO_J.XPT") %>% as.data.frame()
+bodym <- read_xpt("https://wwwn.cdc.gov/Nchs/Nhanes/2017-2018/BMX_J.XPT") %>% as.data.frame()
+
+# Check for duplicates
+length(unique(demo$SEQN)) == length(demo$SEQN)
+length(unique(bodym$SEQN)) == length(bodym$SEQN)
+
+# Verify bodym SEQN lines exist within demo
+length(bodym$SEQN %in% demo$SEQN)
+
+# Create obesity variable
+bodym$OB <- ifelse(bodym$BMXBMI >= 30, 1, 0)
+
+# Merge datasets and select relevant columns
+df <- merge(demo, bodym, by = "SEQN") %>%
+  select(SEQN, BMXBMI, DMDYRSUS, DMDMARTL, INDFMPIR, RIDAGEYR, OB) %>%
+  filter(complete.cases(.))
+
+# Set categorical variables
+df$DMDYRSUS <- as.factor(df$DMDYRSUS)
+df$DMDMARTL <- as.factor(df$DMDMARTL)
+
+# Filter for adults and exclude invalid marital status
+df <- df %>%
+  filter(RIDAGEYR >= 18, DMDMARTL != "77")
+
+# Perform regression
+m1 <- lm(OB ~ DMDYRSUS + DMDMARTL + INDFMPIR, data = df)
+summary(m1)
+
+m2 <- glm(OB ~ DMDYRSUS + DMDMARTL + INDFMPIR, data = df, family = "binomial")
+summary(m2)
+summary(margins(m2))
+
+# Odds ratio calculation
+exp(cbind(OR = coef(m2), confint(m2)))
+
+# Predict from models
+df$predLPM <- ifelse(predict(m1, type = "response") > 0.5, 1, 0)
+df$predLogit <- ifelse(predict(m2, type = "response") > 0.5, 1, 0)
+
+# Histograms of predictions
+hist(df$predLPM)
+hist(df$predLogit)
+
+# Confusion matrix
+table(df$predLogit, df$OB)
+
+# Model evaluation metrics
+accuracy <- mean(df$OB == df$predLogit)
+sensitivity <- mean(df[df$OB == 1,]$predLogit == 1)
+specificity <- mean(df[df$OB == 0,]$predLogit == 0)
+
+# Helper function for evaluation at different thresholds
+evaluate_model <- function(threshold) {
+  df$predLogit <- ifelse(predict(m2, type = "response") > threshold, 1, 0)
+  c(
+    Accuracy = mean(df$OB == df$predLogit),
+    Sensitivity = mean(df[df$OB == 1,]$predLogit == 1),
+    Specificity = mean(df[df$OB == 0,]$predLogit == 0)
+  )
+}
+
+evaluate_model(0.5)
+evaluate_model(0.3)
+evaluate_model(0.1)
+
+# ROC and AUC
+rocLogit <- roc(df$OB, predict(m2, type = "response"))
+plot(rocLogit)
+auc(rocLogit)
+ci.auc(rocLogit, method = "bootstrap")
+
+# Train-test split
+set.seed(123)
+trainIdx <- sample(nrow(df), 0.8 * nrow(df))
+train_data <- df[trainIdx,]
+test_data <- df[-trainIdx,]
+
+# Train models on training data
+m1 <- lm(OB ~ DMDYRSUS + DMDMARTL + INDFMPIR, data = train_data)
+m2 <- glm(OB ~ DMDYRSUS + DMDMARTL + INDFMPIR, data = train_data, family = "binomial")
+
+# Predict on test data
+predm1 <- predict(m1, test_data, type = "response")
+predm2 <- predict(m2, test_data, type = "response")
+
+# ROC and AUC for test data
+rocm1 <- roc(test_data$OB, predm1)
+rocm2 <- roc(test_data$OB, predm2)
+auc(rocm1)
+auc(rocm2)
+ci.auc(rocm1)
+ci.auc(rocm2)
+
+plot(predm1, predm2)
+
+summary(m2)
+summary(margins(m2))
