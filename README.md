@@ -5,7 +5,7 @@ My name is Michael Pham, a pharmacist with a passion for healthcare data analyti
 
 What You'll Find Here:
 
--A variety of coding projects categorized by language.
+-A variety of coding projects categorized by language.<br/>
 -Examples of my work in R (and Rmd), Python, SAS, and SQL.
 -My approach to problem-solving and code structure.
 
