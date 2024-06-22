@@ -1,7 +1,7 @@
 # Michael-Pham---Coding-Portfolio
 Thanks for visiting my coding portfolio!
 
-I'm Michael Pham, a pharmacist with a passion for healthcare data analytics and informatics. This repository showcases my coding projects and demonstrates my skills in various programming languages.
+My name is Michael Pham, a pharmacist with a passion for healthcare data analytics and informatics. This repository showcases my coding projects and demonstrates my skills in various programming languages.
 
 What You'll Find Here:
 
