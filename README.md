@@ -6,12 +6,12 @@ My name is Michael Pham, a pharmacist with a passion for healthcare data analyti
 What You'll Find Here:
 
 -A variety of coding projects categorized by language.<br/>
--Examples of my work in R (and Rmd), Python, SAS, and SQL.
--My approach to problem-solving and code structure.
+-Examples of my work in R (and Rmd), Python, SAS, and SQL.<br/>
+-My approach to problem-solving and code structure.<br/>
 
 Feel free to:
 
--Explore my projects and code.
--Reach out to me if you have any questions or feedback!
+-Explore my projects and code.<br/>
+-Reach out to me if you have any questions or feedback!<br/>
 
 mpham@uams.edu
